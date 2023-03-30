@@ -1,0 +1,35 @@
+    save_best: False
+    plot_agents: False
+
+    logger:
+      classname: bbrl.utils.logger.TFLogger
+      log_dir: ./dqn_logs/
+      verbose: False
+      every_n_seconds: 10
+
+    algorithm:
+      seed: 4
+      nb_seeds: 1
+      epsilon_init: 0.02
+      max_grad_norm: 0.5
+      buffer_size: 1e6
+      n_envs: 1
+      n_steps: 64
+      batch_size: 256
+      eval_interval: 2000
+      target_critic_update: 5000
+      nb_evals: 1
+      gae: 0.8
+      max_epochs: 1000
+      discount_factor: 0.99
+      architecture:
+        hidden_size: [128, 128]
+
+    gym_env:
+      classname: __main__.make_gym_env
+      env_name: MazeMDP-v0
+      env_kwargs: {"width": 5, "height": 5, "ratio": 0.2}
+
+    optimizer:
+      classname: torch.optim.Adam
+      lr: 2.3e-3
