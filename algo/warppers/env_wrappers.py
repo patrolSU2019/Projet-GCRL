@@ -47,8 +47,8 @@ class MazeMDPContinuousHerWrapper(gym.Wrapper):
         xc = x + random.random()
         yc = y + random.random()
         continuous_obs = [xc, yc]
-        disired_goal = self.env.mdp.terminal_states[0]
-        achieved_goal = self.env.mdp.current_state
+        disired_goal = [self.env.mdp.terminal_states[0]]
+        achieved_goal = [self.env.mdp.current_state]
 
         return {
             "observation": continuous_obs,
@@ -66,8 +66,8 @@ class MazeMDPContinuousHerWrapper(gym.Wrapper):
         xc = x + random.random()
         yc = y + random.random()
         next_continuous = [xc, yc]
-        disired_goal = self.env.mdp.terminal_states[0]
-        achieved_goal = self.env.mdp.current_state
+        disired_goal = [self.env.mdp.terminal_states[0]]
+        achieved_goal = [self.env.mdp.current_state]
         return (
             {
                 "observation": next_continuous,
