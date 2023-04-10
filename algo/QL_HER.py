@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-from memory.Memory import ReplayBuffer
+from .memory.Memory import ReplayBuffer
 import numpy as np
 from bbrl_gym.envs.maze_mdp import MazeMDPEnv
 from tqdm import tqdm
