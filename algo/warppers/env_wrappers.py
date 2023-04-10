@@ -2,17 +2,16 @@ import random
 import numpy as np
 import gym
 from gym import spaces
+from torch import Tensor
 
-from mazemdp import mdp
 
-
-class MazeMDPContinuousHerWrapper(gym.Wrapper):
+class MazeMDPContinuousGoalWrapper(gym.Wrapper):
     """
     Specific wrapper to turn the Tabular MazeMDP into a continuous state version
     """
 
     def __init__(self, env):
-        super(MazeMDPContinuousHerWrapper, self).__init__(env)
+        super(MazeMDPContinuousGoalWrapper, self).__init__(env)
         # Building a new continuous observation space from the coordinates of each state
         high = np.array(
             [
@@ -66,19 +65,19 @@ class MazeMDPContinuousHerWrapper(gym.Wrapper):
         xc = x + random.random()
         yc = y + random.random()
         next_continuous = [xc, yc]
-        disired_goal = [self.env.mdp.terminal_states[0]]
+        desired_goal = [self.env.mdp.terminal_states[0]]
         achieved_goal = [self.env.mdp.current_state]
         return (
             {
                 "observation": next_continuous,
                 "achieved_goal": achieved_goal,
-                "desired_goal": disired_goal,
+                "desired_goal": desired_goal,
             },
             reward,
             done,
             info,
         )
-    
+
     def compute_reward(self, achieved_goal, desired_goal, info):
         """Compute the step reward. This externalizes the reward function and makes it dependent on a desired goal and the one that was achieved.
         If you wish to include additional rewards that are independent of the goal, you can include the necessary values
@@ -97,4 +96,14 @@ class MazeMDPContinuousHerWrapper(gym.Wrapper):
             return 1.0
         else:
             return 0.0
-        
+
+    def change_goal(self, goal):
+        if isinstance(goal, Tensor):
+            goal = goal.tolist()
+        # print("Changing goal to ", goal)
+        self.change_last_states(goal)
+
+    def int_goal_to_continuous(self, goal):
+        x = self.env.coord_x[goal]
+        y = self.env.coord_y[goal]
+        return [x, y]

@@ -1,1 +1,1 @@
-from warppers.env_wrappers import MazeMDPContinuousHerWrapper
+from warppers.env_wrappers import MazeMDPContinuousGoalWrapper

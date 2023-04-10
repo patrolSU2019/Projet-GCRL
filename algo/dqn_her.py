@@ -20,7 +20,7 @@ from bbrl.workspace import Workspace
 # Agents(agent1,agent2,agent3,...) executes the different agents the one after the other
 # TemporalAgent(agent) executes an agent over multiple timesteps in the workspace,
 # or until a given condition is reached
-from bbrl.agents import Agents, RemoteAgent, TemporalAgent
+from bbrl.agents import Agents, RemoteAgent, TemporalAgent, PrintAgent
 
 # AutoResetGymAgent is an agent able to execute a batch of gym environments
 # with auto-resetting. These agents produce multiple variables in the workspace:
@@ -35,7 +35,7 @@ from bbrl.utils.replay_buffer import ReplayBuffer
 
 import bbrl_gym
 
-from warppers import MazeMDPContinuousHerWrapper
+from warppers import MazeMDPContinuousGoalWrapper
 
 from bbrl_examples.models.loggers import Logger, RewardLogger
 from bbrl_examples.models.plotters import Plotter
@@ -47,6 +47,58 @@ def build_mlp(sizes, activation, output_activation=nn.Identity()):
         act = activation if j < len(sizes) - 2 else output_activation
         layers += [nn.Linear(sizes[j], sizes[j + 1]), act]
     return nn.Sequential(*layers)
+
+
+class GoalEnvAgent(NoAutoResetGymAgent):
+    def __init__(
+        self,
+        make_env_fn=None,
+        make_env_args={},
+        n_envs=None,
+        seed=None,
+        action_string="action",
+        goal_string="env/desired_goal",
+        output="env/",
+    ):
+        super().__init__(
+            make_env_fn=make_env_fn,
+            make_env_args=make_env_args,
+            n_envs=n_envs,
+            seed=seed,
+            action_string=action_string,
+            output=output,
+        )
+        self.goal_string = goal_string
+
+    def forward(self, t=0, save_render=False, render=False, **kwargs):
+        """Do one step by reading the `action` at t-1
+        If t==0, environments are reset
+        If save_render is True, then the output of env.render(mode="image") is written as env/rendering
+        """
+
+        if t == 0:
+            self.timestep = torch.tensor([0 for _ in self.envs])
+            observations = []
+            goals = self.get((self.goal_string, t))
+            assert goals.size()[0] == self.n_envs, "Incompatible number of envs"
+            for k, e in enumerate(self.envs):
+                e.change_goal(goals[k])
+                obs = self._reset(k, save_render, render)
+                observations.append(obs)
+            self.set_obs(observations, t)
+        else:
+            assert t > 0
+            action = self.get((self.input, t - 1))
+            assert action.size()[0] == self.n_envs, "Incompatible number of envs"
+            observations = []
+            rewards = []
+            for k, e in enumerate(self.envs):
+                obs, reward = self._step(k, action[k], save_render, render)
+                observations.append(obs)
+                rewards.append(reward)
+            self.set_reward(rewards, t - 1)
+            self.set_reward(rewards, t)
+            self.set_obs(observations, t)
 
 
 class GoalAgent(Agent):
@@ -68,10 +120,10 @@ class GoalAgent(Agent):
         return result
 
     def _custom_rand_int(self, size, ranges):
-        result = torch.empty(size).type(torch.int32)
+        result = torch.empty(size).type(torch.int64)
         for j in range(size[1]):
             lower, upper = ranges[j][0], ranges[j][1]
-            result[:, j] = torch.randint(lower, upper, (1, size[0])).type(torch.int32)
+            result[:, j] = torch.randint(lower, upper, (1, size[0])).type(torch.int64)
         return result
 
     def forward(self, t, **kwargs):
@@ -86,11 +138,11 @@ class GoalAgent(Agent):
                 )
             else:
                 raise ValueError("Unknown goal type")
-            self.set(("desired_goal", t), goal)
+            self.set(("env/desired_goal", t), goal)
             self.goal = goal
         else:
             assert self.goal is not None, "Goal not set"
-            self.set(("desired_goal", t), self.goal)
+            self.set(("env/desired_goal", t), self.goal)
 
 
 class RewardAgent(Agent):
@@ -128,7 +180,6 @@ class DiscreteQAgent(Agent):
         # desired_goal Tensor of shape (N, goal_dim)
         desired_goal = self.get(("env/desired_goal", t))
         achieved_goal = self.get(("env/achieved_goal", t))
-
         # done = (desired_goal == achieved_goal).squeeze()
         # if done.ndimension() == 0:
         #     done = done.view(
@@ -178,7 +229,7 @@ class EGreedyActionSelector(Agent):
 
 
 def make_gym_env(env_name, env_kwargs):
-    return MazeMDPContinuousHerWrapper(gym.make(env_name, kwargs=env_kwargs))
+    return MazeMDPContinuousGoalWrapper(gym.make(env_name, kwargs=env_kwargs))
 
 
 def create_dqn_agent(cfg, train_env_agent, eval_env_agent):
@@ -189,13 +240,20 @@ def create_dqn_agent(cfg, train_env_agent, eval_env_agent):
     target_critic = copy.deepcopy(critic)
     explorer = EGreedyActionSelector(cfg.algorithm.epsilon_init)
     q_agent = TemporalAgent(critic)
+    p_agent = PrintAgent()
     target_q_agent = TemporalAgent(target_critic)
     goal_setter = GoalAgent(
         cfg.algorithm.n_envs, cfg.goal.goal_dim, cfg.goal.goal_range, cfg.goal.goal_type
     )
+    eval_goal_setter = GoalAgent(
+        cfg.algorithm.nb_evals,
+        cfg.goal.goal_dim,
+        cfg.goal.goal_range,
+        cfg.goal.goal_type,
+    )
     reward_calculator = RewardAgent(cfg.goal.reward_scale)
-    tr_agent = Agents(train_env_agent, critic, explorer)
-    ev_agent = Agents(eval_env_agent, critic)
+    tr_agent = Agents(goal_setter, train_env_agent, critic, explorer)
+    ev_agent = Agents(eval_goal_setter, eval_env_agent, critic)
 
     # Get an agent that is executed on a complete workspace
     train_agent = TemporalAgent(tr_agent)
@@ -255,16 +313,16 @@ def compute_critic_loss(cfg, reward, must_bootstrap, q_values, action):
 def run_dqn(cfg, reward_logger):
     # 1)  Build the  logger
     logger = Logger(cfg)
-    best_reward = -10e9
+    shortest_timestep = 10e9
 
     # 2) Create the environment agent
-    train_env_agent = NoAutoResetGymAgent(
+    train_env_agent = GoalEnvAgent(
         get_class(cfg.gym_env),
         get_arguments(cfg.gym_env),
         cfg.algorithm.n_envs,
         cfg.algorithm.seed,
     )
-    eval_env_agent = NoAutoResetGymAgent(
+    eval_env_agent = GoalEnvAgent(
         get_class(cfg.gym_env),
         get_arguments(cfg.gym_env),
         cfg.algorithm.nb_evals,
@@ -325,12 +383,12 @@ def run_dqn(cfg, reward_logger):
             eval_agent(
                 eval_workspace, t=0, stop_variable="env/done", choose_action=True
             )
-            rewards = eval_workspace["env/cumulated_reward"][-1]
-            mean = rewards.mean()
-            logger.add_log("reward", mean, nb_steps)
+            timestep = eval_workspace["env/timestep"][-1]
+            mean = timestep.float().mean()
+            logger.add_log("timestep", mean, nb_steps)
             print(f"nb_steps: {nb_steps}, reward: {mean}")
-            if cfg.save_best and mean > best_reward:
-                best_reward = mean
+            if cfg.save_best and mean < shortest_timestep:
+                shortest_timestep = mean
                 directory = "./dqn_critic/"
                 if not os.path.exists(directory):
                     os.makedirs(directory)

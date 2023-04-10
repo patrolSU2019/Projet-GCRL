@@ -33,7 +33,7 @@
 
     goal:
       goal_dim: 1
-      goal_range: [[0,20]]
+      goal_range: [[0,6]]
       goal_type: int
       reward_scale: 1.0
 
