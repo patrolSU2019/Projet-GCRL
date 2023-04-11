@@ -46,13 +46,14 @@ class MazeMDPContinuousGoalWrapper(gym.Wrapper):
         xc = x + random.random()
         yc = y + random.random()
         continuous_obs = [xc, yc]
-        disired_goal = [self.env.mdp.terminal_states[0]]
-        achieved_goal = [self.env.mdp.current_state]
-
+        desired_goal = self.env.mdp.terminal_states[0]
+        gx, gy = self.env.coord_x[desired_goal], self.env.coord_y[desired_goal]
+        desired_goal = [gx, gy]
+        achieved_goal = continuous_obs
         return {
             "observation": continuous_obs,
             "achieved_goal": achieved_goal,
-            "desired_goal": disired_goal,
+            "desired_goal": desired_goal,
         }
 
     def step(self, action):
@@ -65,8 +66,11 @@ class MazeMDPContinuousGoalWrapper(gym.Wrapper):
         xc = x + random.random()
         yc = y + random.random()
         next_continuous = [xc, yc]
-        desired_goal = [self.env.mdp.terminal_states[0]]
-        achieved_goal = [self.env.mdp.current_state]
+        desired_goal = self.env.mdp.terminal_states[0]
+        gx, gy = self.env.coord_x[desired_goal], self.env.coord_y[desired_goal]
+        desired_goal = [gx, gy]
+
+        achieved_goal = next_continuous
         return (
             {
                 "observation": next_continuous,
@@ -100,10 +104,4 @@ class MazeMDPContinuousGoalWrapper(gym.Wrapper):
     def change_goal(self, goal):
         if isinstance(goal, Tensor):
             goal = goal.tolist()
-        # print("Changing goal to ", goal)
         self.change_last_states(goal)
-
-    def int_goal_to_continuous(self, goal):
-        x = self.env.coord_x[goal]
-        y = self.env.coord_y[goal]
-        return [x, y]

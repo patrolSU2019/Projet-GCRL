@@ -2,13 +2,15 @@ import copy
 import os
 import sys
 import hydra
+from matplotlib import pyplot as plt
+import numpy as np
 from omegaconf import DictConfig
 
 import torch
 from torch import nn
 from torch.nn import functional as F
 from torch.nn.utils.clip_grad import clip_grad_norm_
-import numpy as np
+
 import gym
 
 from bbrl.agents.agent import Agent
@@ -20,14 +22,14 @@ from bbrl.workspace import Workspace
 # Agents(agent1,agent2,agent3,...) executes the different agents the one after the other
 # TemporalAgent(agent) executes an agent over multiple timesteps in the workspace,
 # or until a given condition is reached
-from bbrl.agents import Agents, RemoteAgent, TemporalAgent, PrintAgent
+from bbrl.agents import Agents, TemporalAgent, PrintAgent
 
 # AutoResetGymAgent is an agent able to execute a batch of gym environments
 # with auto-resetting. These agents produce multiple variables in the workspace:
 # ’env/env_obs’, ’env/reward’, ’env/timestep’, ’env/done’, ’env/initial_state’, ’env/cumulated_reward’,
 # ... When called at timestep t=0, then the environments are automatically reset.
 # At timestep t>0, these agents will read the ’action’ variable in the workspace at time t − 1
-from bbrl.agents.gymb import AutoResetGymAgent, NoAutoResetGymAgent
+from bbrl.agents.gymb import NoAutoResetGymAgent
 
 # Not present in the A2C version...
 from bbrl.utils.logger import TFLogger
@@ -57,7 +59,7 @@ class GoalEnvAgent(NoAutoResetGymAgent):
         n_envs=None,
         seed=None,
         action_string="action",
-        goal_string="env/desired_goal",
+        goal_string="desired_goal",
         output="env/",
     ):
         super().__init__(
@@ -79,6 +81,7 @@ class GoalEnvAgent(NoAutoResetGymAgent):
         if t == 0:
             self.timestep = torch.tensor([0 for _ in self.envs])
             observations = []
+            rewards = [{"reward": torch.tensor([0.0])} for _ in range(self.n_envs)]
             goals = self.get((self.goal_string, t))
             assert goals.size()[0] == self.n_envs, "Incompatible number of envs"
             for k, e in enumerate(self.envs):
@@ -86,6 +89,7 @@ class GoalEnvAgent(NoAutoResetGymAgent):
                 obs = self._reset(k, save_render, render)
                 observations.append(obs)
             self.set_obs(observations, t)
+            self.set_reward(rewards, t)
         else:
             assert t > 0
             action = self.get((self.input, t - 1))
@@ -102,22 +106,13 @@ class GoalEnvAgent(NoAutoResetGymAgent):
 
 
 class GoalAgent(Agent):
-    def __init__(self, n_env, goal_dim, goal_range, goal_type="float"):
+    def __init__(self, n_env, goal_dim, goal_range, goal_type="int"):
         super().__init__()
         self.n_env = n_env
         self.goal_dim = goal_dim
         self.goal_range = goal_range
         self.goal = None
         self.goal_type = goal_type
-
-    def _custom_rand_float(self, size, ranges):
-        """Generates a tensor of random numbers with different ranges for each position"""
-        result = torch.empty(size)
-        for j in range(size[1]):
-            lower, upper = ranges[j][0], ranges[j][1]
-            result[:, j] = torch.rand(size[0]).mul_(upper - lower).add_(lower)
-
-        return result
 
     def _custom_rand_int(self, size, ranges):
         result = torch.empty(size).type(torch.int64)
@@ -128,40 +123,13 @@ class GoalAgent(Agent):
 
     def forward(self, t, **kwargs):
         if t == 0:
-            if self.goal_type == "float":
-                goal = self._custom_rand_float(
-                    (self.n_env, self.goal_dim), self.goal_range
-                )
-            elif self.goal_type == "int":
-                goal = self._custom_rand_int(
-                    (self.n_env, self.goal_dim), self.goal_range
-                )
-            else:
-                raise ValueError("Unknown goal type")
-            self.set(("env/desired_goal", t), goal)
+            goal = self._custom_rand_int((self.n_env, self.goal_dim), self.goal_range)
+
+            self.set(("desired_goal", t), goal)
             self.goal = goal
         else:
             assert self.goal is not None, "Goal not set"
-            self.set(("env/desired_goal", t), self.goal)
-
-
-class RewardAgent(Agent):
-    def __init__(self, reward_scale):
-        super().__init__()
-        self.reward_scale = reward_scale
-
-    def forward(self, t, **kwargs):
-        if t == 0:
-            return
-        # desired_goal Tensor of shape (N, goal_dim)
-        desired_goal = self.get(("env/desired_goal", t))
-
-        # achieved_goal Tensor of shape (N, goal_dim)
-        achieved_goal = self.get(("env/achieved_goal", t))
-
-        reward = (achieved_goal == desired_goal).all(dim=-1).float()
-
-        self.set(("env/reward", t), reward * self.reward_scale)
+            self.set(("desired_goal", t), self.goal)
 
 
 class DiscreteQAgent(Agent):
@@ -235,7 +203,7 @@ def make_gym_env(env_name, env_kwargs):
 def create_dqn_agent(cfg, train_env_agent, eval_env_agent):
     obs_size, act_size = train_env_agent.get_obs_and_actions_sizes()
     critic = DiscreteQAgent(
-        obs_size, cfg.algorithm.architecture.hidden_size, act_size, cfg.goal.goal_dim
+        obs_size, cfg.algorithm.architecture.hidden_size, act_size, cfg.goal.goal_nn_dim
     )
     target_critic = copy.deepcopy(critic)
     explorer = EGreedyActionSelector(cfg.algorithm.epsilon_init)
@@ -251,7 +219,7 @@ def create_dqn_agent(cfg, train_env_agent, eval_env_agent):
         cfg.goal.goal_range,
         cfg.goal.goal_type,
     )
-    reward_calculator = RewardAgent(cfg.goal.reward_scale)
+
     tr_agent = Agents(goal_setter, train_env_agent, critic, explorer)
     ev_agent = Agents(eval_goal_setter, eval_env_agent, critic)
 
@@ -289,7 +257,6 @@ def compute_critic_loss(cfg, reward, must_bootstrap, q_values, action):
 
     # We compute the max of Q-values over all actions
     max_q = q_values.max(2)[0].detach()
-
     # To get the max of Q(s_{t+1}, a), we take max_q[1:]
     # The same about must_bootstrap.
     target = (
@@ -311,7 +278,7 @@ def compute_critic_loss(cfg, reward, must_bootstrap, q_values, action):
 
 
 def run_dqn(cfg, reward_logger):
-    # 1)  Build the  logger
+    # 1)  Build the logger
     logger = Logger(cfg)
     shortest_timestep = 10e9
 
@@ -346,6 +313,8 @@ def run_dqn(cfg, reward_logger):
     nb_steps = 0
     tmp_steps = 0
     nb_measures = 0
+
+    # env = make_gym_env(cfg.gym_env.env_name, cfg.gym_env.env_kwargs)
 
     while nb_measures < cfg.algorithm.nb_measures:
         train_workspace = Workspace()  # Used for training
@@ -387,7 +356,24 @@ def run_dqn(cfg, reward_logger):
             mean = timestep.float().mean()
             logger.add_log("timestep", mean, nb_steps)
             reward_logger.add(nb_steps, mean)
-            print(f"nb_steps: {nb_steps}, reward: {mean}")
+            print(f"nb_steps: {nb_steps}, timesetp: {mean}")
+
+            # q_agent.agent.save_model("dqn_critic.pkl")
+            # model = torch.load("dqn_critic.pkl")
+            # for goal in range(env.nb_states - 1):
+            #     env.change_goal([goal])
+            #     gx, gy = env.coord_x[goal], env.coord_y[goal]
+            #     q_values = np.zeros((env.nb_states - 1, env.action_space.n))
+            #     for i in range(env.nb_states - 1):
+            #         sx, sy = env.coord_x[i], env.coord_y[i]
+            #         q_values[i, :] = (
+            #             model.model(torch.tensor([sx, sy, gx, gy]).float())
+            #             .detach()
+            #             .numpy()
+            #         )
+            #     env.draw_v_pi(q_values, np.argmax(q_values, axis=1))
+            #     plt.show()
+
             if cfg.save_best and mean < shortest_timestep:
                 shortest_timestep = mean
                 directory = "./dqn_critic/"

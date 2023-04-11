@@ -13,29 +13,30 @@
       epsilon_init: 0.1
       max_grad_norm: 0.5
       buffer_size: 1e6
-      n_envs: 8
-      n_steps: 32
+      n_envs: 4
+      n_steps: 50
       batch_size: 256
-      eval_interval: 2000
-      nb_measures: 200
+      eval_interval: 1000
+      nb_measures: 35
       target_critic_update: 5000
-      nb_evals: 1
+      nb_evals: 2
       gae: 0.8
       max_epochs: 1000
-      discount_factor: 0.99
+      discount_factor: 0.9
       architecture:
         hidden_size: [128, 128]
 
     gym_env:
       classname: __main__.make_gym_env
       env_name: MazeMDP-v0
-      env_kwargs: {"width": 3, "height": 3, "ratio": 0.2}
+      env_kwargs: {"width": 3, "height": 3, "ratio": 0.2,"walls":[0,8]}
 
     goal:
       goal_dim: 1
       goal_range: [[0,6]]
       goal_type: int
       reward_scale: 1.0
+      goal_nn_dim: 2
 
     optimizer:
       classname: torch.optim.Adam
