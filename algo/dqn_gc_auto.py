@@ -2,6 +2,7 @@ import copy
 import os
 import sys
 import hydra
+from matplotlib import pyplot as plt
 from omegaconf import DictConfig
 
 import torch
@@ -51,7 +52,7 @@ def build_mlp(sizes, activation, output_activation=nn.Identity()):
     return nn.Sequential(*layers)
 
 
-class AuroResetGoalEnvAgent(AutoResetGymAgent):
+class AutoResetGoalEnvAgent(AutoResetGymAgent):
     def __init__(
         self,
         make_env_fn=None,
@@ -110,17 +111,7 @@ class GoalAgent(Agent):
         self.n_env = n_env
         self.goal_dim = goal_dim
         self.goal_range = goal_range
-
         self.goal_type = goal_type
-
-    def _custom_rand_float(self, size, ranges):
-        """Generates a tensor of random numbers with different ranges for each position"""
-        result = torch.empty(size)
-        for j in range(size[1]):
-            lower, upper = ranges[j][0], ranges[j][1]
-            result[:, j] = torch.rand(size[0]).mul_(upper - lower).add_(lower)
-
-        return result
 
     def _custom_rand_int(self, size, ranges):
         result = torch.empty(size).type(torch.int64)
@@ -130,15 +121,12 @@ class GoalAgent(Agent):
         return result
 
     def forward(self, t, **kwargs):
-        if self.goal_type == "float":
-            goal = self._custom_rand_float((self.n_env, self.goal_dim), self.goal_range)
-        elif self.goal_type == "int":
-            goal = self._custom_rand_int((self.n_env, self.goal_dim), self.goal_range)
-        else:
-            raise ValueError("Unknown goal type")
+        goal = self._custom_rand_int((self.n_env, self.goal_dim), self.goal_range)
         self.set(("desired_goal", t), goal)
+        self.goal = goal
 
 
+# TODO : not used
 class RewardAgent(Agent):
     def __init__(self, reward_scale):
         super().__init__()
@@ -229,12 +217,12 @@ def make_gym_env(env_name, env_kwargs):
 def create_dqn_agent(cfg, train_env_agent, eval_env_agent):
     obs_size, act_size = train_env_agent.get_obs_and_actions_sizes()
     critic = DiscreteQAgent(
-        obs_size, cfg.algorithm.architecture.hidden_size, act_size, cfg.goal.goal_dim
+        obs_size, cfg.algorithm.architecture.hidden_size, act_size, cfg.goal.goal_nn_dim
     )
     target_critic = copy.deepcopy(critic)
     explorer = EGreedyActionSelector(cfg.algorithm.epsilon_init)
     q_agent = TemporalAgent(critic)
-    p_agent = PrintAgent()
+
     target_q_agent = TemporalAgent(target_critic)
     goal_setter = GoalAgent(
         cfg.algorithm.n_envs, cfg.goal.goal_dim, cfg.goal.goal_range, cfg.goal.goal_type
@@ -245,7 +233,7 @@ def create_dqn_agent(cfg, train_env_agent, eval_env_agent):
         cfg.goal.goal_range,
         cfg.goal.goal_type,
     )
-    reward_calculator = RewardAgent(cfg.goal.reward_scale)
+
     tr_agent = Agents(goal_setter, train_env_agent, critic, explorer)
     ev_agent = Agents(eval_goal_setter, eval_env_agent, critic)
 
@@ -305,13 +293,13 @@ def run_dqn(cfg, reward_logger):
     shortest_timestep = 10e9
 
     # 2) Create the environment agent
-    train_env_agent = AuroResetGoalEnvAgent(
+    train_env_agent = AutoResetGoalEnvAgent(
         get_class(cfg.gym_env),
         get_arguments(cfg.gym_env),
         cfg.algorithm.n_envs,
         cfg.algorithm.seed,
     )
-    eval_env_agent = AuroResetGoalEnvAgent(
+    eval_env_agent = AutoResetGoalEnvAgent(
         get_class(cfg.gym_env),
         get_arguments(cfg.gym_env),
         cfg.algorithm.nb_evals,
@@ -335,6 +323,8 @@ def run_dqn(cfg, reward_logger):
     nb_steps = 0
     tmp_steps = 0
     tmp_steps2 = 0
+
+    # env = make_gym_env(cfg.gym_env.env_name, cfg.gym_env.env_kwargs)
 
     # 7) Training loop
     for epoch in range(cfg.algorithm.max_epochs):
@@ -407,6 +397,23 @@ def run_dqn(cfg, reward_logger):
             logger.add_log("timestep", mean, nb_steps)
             reward_logger.add(nb_steps, mean)
             print(f"nb_steps: {nb_steps}, timesteps to reach goal: {mean}")
+
+            # q_agent.agent.save_model("dqn_critic.pkl")
+            # model = torch.load("dqn_critic.pkl")
+            # for goal in range(env.nb_states - 1):
+            #     env.change_goal([goal])
+            #     gx, gy = env.coord_x[goal], env.coord_y[goal]
+            #     q_values = np.zeros((env.nb_states - 1, env.action_space.n))
+            #     for i in range(env.nb_states - 1):
+            #         sx, sy = env.coord_x[i], env.coord_y[i]
+            #         q_values[i, :] = (
+            #             model.model(torch.tensor([sx, sy, gx, gy]).float())
+            #             .detach()
+            #             .numpy()
+            #         )
+            #     env.draw_v_pi(q_values, np.argmax(q_values, axis=1))
+            #     plt.show()
+
             if cfg.save_best and mean < shortest_timestep:
                 shortest_timestep = mean
                 directory = "./dqn_critic/"
