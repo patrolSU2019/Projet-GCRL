@@ -57,6 +57,8 @@ class RewardAgent(Agent):
 
     def forward(self, t, **kwargs):
         if t == 0:
+            n_env = self.get(("env/env_obs", t)).shape[0]
+            self.set(("env/return", t), torch.zeros(n_env).float())
             return
         achieved_goal = self.get(("env/env_obs", t))
         desired_goal = self.get(("env/desired_goal", t))
@@ -64,6 +66,9 @@ class RewardAgent(Agent):
         reward = self.compute_reward(achieved_goal, desired_goal)
         self.set(("env/reward", t - 1), reward)
         self.set(("env/reward", t), reward)
+        _return = self.get(("env/return", t - 1))
+        _return += reward
+        self.set(("env/return", t), _return)
 
         # terminated = self.compute_terminated(achieved_goal, desired_goal)
         # done = self.get(("env/done", t))
@@ -87,9 +92,9 @@ class HerFinal(HerAgent):
         self.goal = None
 
     def forward(self, t, trajectory, **kwargs):
-        if self.goal is None:
+        if t == 0:
             assert self.workspace is not None, "Workspace not set"
-            self.goal = trajectory["env/env_obs"][-1][:, [0, 2]]
+            self.goal = trajectory["env/env_obs"][-1][:, [0]]
         self.set(("env/desired_goal", t), self.goal)
         self.set(("env/env_obs", t), trajectory.get("env/env_obs", t))
         self.set(("env/done", t), trajectory.get("env/done", t))

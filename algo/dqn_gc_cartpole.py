@@ -49,23 +49,25 @@ def compute_critic_loss(cfg, reward, must_bootstrap, q_values, target_q_values, 
 
 def compute_reward(achieved_goal, desired_goal):
     # achieved_goal (batch, 4)
-    # desired_goal (batch, 2)
-    achieved_goal = achieved_goal[:, [0, 2]]
+    # desired_goal (batch, 1)
+    achieved_goal = achieved_goal[:, [0]]
     dist = torch.abs(achieved_goal - desired_goal)
-    epsilon = torch.tensor([1, 0.1])
+    epsilon = torch.tensor([0.2])
     reward = torch.all(dist < epsilon, dim=1).float()
+
     return reward
 
 
 def compute_terminated(achieved_goal, desired_goal):
     # achieved_goal (batch, 4)
-    # desired_goal (batch, 2)
-    achieved_goal = achieved_goal[:, [0, 2]]
-    dist = torch.abs(achieved_goal - desired_goal)
+    # desired_goal (batch, 1)
+    # achieved_goal = achieved_goal[:, [0]]
+    # dist = torch.abs(achieved_goal - desired_goal)
+    # epsilon = torch.tensor([0.5])
+    # terminated = torch.all(dist < epsilon, dim=1)
 
-    epsilon = torch.tensor([1, 0.1])
-    terminated = torch.all(dist < epsilon, dim=1).bool()
-    return terminated
+    # return terminated
+    pass
 
 
 def create_dqn_agent(cfg, train_env_agent, eval_env_agent):
@@ -210,14 +212,14 @@ def run_dqn(cfg, reward_logger):
                 t=0,
                 stop_variable="env/done",
                 choose_action=True,
-                render=True,
+                # render=True,
             )
             print(eval_workspace["env/desired_goal"][-1])
             print(eval_workspace["env/env_obs"][-1])
-            time_step = eval_workspace["env/timestep"][-1].float()
-            mean = time_step.mean()
+            _return = eval_workspace["env/return"][-1].float()
+            mean = _return.mean()
             logger.add_log("reward", mean, nb_steps)
-            print(f"nb_steps: {nb_steps}, timesetp: {mean}")
+            print(f"nb_steps: {nb_steps}, return: {mean}")
             reward_logger.add(nb_steps, mean)
 
 
