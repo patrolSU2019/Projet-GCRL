@@ -72,7 +72,7 @@ class RewardAgent(Agent):
 
         # terminated = self.compute_terminated(achieved_goal, desired_goal)
         # done = self.get(("env/done", t))
-        # self.set(("env/truncated", t), done)
+        # self.set(("env/truncated", t), torch.zeros(n_env).bool())
         # done = terminated | done
         # self.set(("env/done", t), done)
 
@@ -99,3 +99,7 @@ class HerFinal(HerAgent):
         self.set(("env/env_obs", t), trajectory.get("env/env_obs", t))
         self.set(("env/done", t), trajectory.get("env/done", t))
         self.set(("action", t), trajectory.get("action", t))
+        self.set(("env/truncated", t), trajectory.get("env/truncated", t))
+        self.set(("env/timestep", t), trajectory.get("env/timestep", t))
+        self.set(("env/cumulated_reward", t), trajectory.get("env/cumulated_reward", t))
+        self.set(("q_values", t), trajectory.get("q_values", t))

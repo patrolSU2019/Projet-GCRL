@@ -148,25 +148,24 @@ def run_dqn(cfg, reward_logger):
             stochastic=True,
         )
 
-        her_workspace = Workspace()
-
-        her_agent(
-            her_workspace,
-            t=0,
-            n_steps=train_workspace.time_size(),
-            trajectory=train_workspace,
-        )
-
         transition_workspace = train_workspace.get_transitions()
         action = transition_workspace["action"]
         nb_steps += action[0].shape[0]
 
-        her_transition_workspace = her_workspace.get_transitions()
+        if cfg.algorithm.her:
+            her_workspace = Workspace()
+            her_agent(
+                her_workspace,
+                t=0,
+                n_steps=train_workspace.time_size(),
+                trajectory=train_workspace,
+            )
+            her_transition_workspace = her_workspace.get_transitions()
+            rb.put(her_transition_workspace)
+
         rb.put(transition_workspace)
-        rb.put(her_transition_workspace)
 
         rb_workspace = rb.get_shuffled(cfg.algorithm.batch_size)
-
         # The q agent needs to be executed on the rb_workspace workspace (gradients are removed in workspace).
         q_agent(rb_workspace, t=0, n_steps=2, choose_action=False)
 
@@ -212,10 +211,10 @@ def run_dqn(cfg, reward_logger):
                 t=0,
                 stop_variable="env/done",
                 choose_action=True,
-                # render=True,
+                render=cfg.algorithm.render_eval,
             )
-            print(eval_workspace["env/desired_goal"][-1])
-            print(eval_workspace["env/env_obs"][-1])
+            # print(eval_workspace["env/desired_goal"][-1])
+            # print(eval_workspace["env/env_obs"][-1])
             _return = eval_workspace["env/return"][-1].float()
             mean = _return.mean()
             logger.add_log("reward", mean, nb_steps)
@@ -239,7 +238,7 @@ def main_loop(cfg):
     reward_logger.save()
 
     plotter = Plotter(logdir + "dqn_rb_target.steps", logdir + "dqn_rb_target.rwd")
-    plotter.plot_reward("qdn rb and target", cfg.gym_env.env_name)
+    plotter.plot_reward("no her", cfg.gym_env.env_name)
 
 
 @hydra.main(config_path="./configs/", config_name="dqn_gc_cartpole.yaml")
