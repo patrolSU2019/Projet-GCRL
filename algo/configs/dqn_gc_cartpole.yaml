@@ -1,35 +1,48 @@
-    save_best: False
-    plot_agents: False
 
     logger:
       classname: bbrl.utils.logger.TFLogger
-      log_dir: ./dqn_logs/
+      # the directory to save the log file
+      log_dir: ./plot/
       verbose: False
       every_n_seconds: 10
 
     algorithm:
       seed: 4
+      # number of seeds to run
       nb_seeds: 1
+      # epsilon greedy exploration
       epsilon_init: 0.02
+      # clip the gradient norm to this value
       max_grad_norm: 0.5
+      # size of the replay buffer
       buffer_size: 1e5
+      # number of the training environment
       n_envs: 10
+      # batch size of the samples from the replay buffer
       batch_size: 1024
+      # number of evaluations
       nb_measures: 300
+      # evaluate every n steps
       eval_interval: 6000
+      # update the target network every n steps
       target_critic_update: 5000
+      # number of the evaluation environments
       nb_evals: 4
-      gae: 0.8
-      max_epochs: 1000
       discount_factor: 0.99
       architecture:
+        # number of hidden layers of the dqn network
         hidden_size: [256, 256]
+      # if use HER
       her: False
+      # if render the evaluation environment
       render_eval: False
 
     goal:
+      # goal dimension
       goal_dim: 1
+      # the range of the goal
       goal_range: [[-1,1]]
+      # the type of the goal
       goal_type: float
 
     gym_env:

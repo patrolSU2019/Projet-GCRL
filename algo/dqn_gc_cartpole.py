@@ -223,7 +223,7 @@ def run_dqn(cfg, reward_logger):
 
 
 def main_loop(cfg):
-    logdir = "./plot/"
+    logdir = cfg.logger.log_dir
     if not os.path.exists(logdir):
         os.makedirs(logdir)
     reward_logger = RewardLogger(
@@ -238,7 +238,10 @@ def main_loop(cfg):
     reward_logger.save()
 
     plotter = Plotter(logdir + "dqn_rb_target.steps", logdir + "dqn_rb_target.rwd")
-    plotter.plot_reward("no her", cfg.gym_env.env_name)
+    if cfg.algorithm.her:
+        plotter.plot_reward("dqn with her", cfg.gym_env.env_name)
+    else:
+        plotter.plot_reward("dqn without her", cfg.gym_env.env_name)
 
 
 @hydra.main(config_path="./configs/", config_name="dqn_gc_cartpole.yaml")
